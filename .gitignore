@@ -1,0 +1,12 @@
+__pycache__/
+*.db
+*.mp4
+*.mov
+*.avi
+videos/
+certified/
+review/
+tools/
+ffmpeg.zip
+.env
+
