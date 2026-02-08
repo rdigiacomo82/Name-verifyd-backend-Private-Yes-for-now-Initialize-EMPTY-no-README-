@@ -1,77 +1,80 @@
-import os
-import uuid
-import subprocess
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+import shutil
+import uuid
+import os
+import subprocess
 
 app = FastAPI()
 
-# -----------------------------
-# FOLDERS
-# -----------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VIDEO_DIR = os.path.join(BASE_DIR, "videos")
-CERT_DIR = os.path.join(BASE_DIR, "certified")
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+# Allow frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-os.makedirs(VIDEO_DIR, exist_ok=True)
-os.makedirs(CERT_DIR, exist_ok=True)
+# Ensure folders exist (Render resets disk)
+os.makedirs("videos", exist_ok=True)
+os.makedirs("certified", exist_ok=True)
+os.makedirs("review", exist_ok=True)
+os.makedirs("assets", exist_ok=True)
 
-# -----------------------------
-# SERVE STATIC FILES (THIS FIXES LOGO 404)
-# -----------------------------
-app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
+LOGO_PATH = "assets/logo.png"
 
-# -----------------------------
-# STATUS CHECK
-# -----------------------------
+
 @app.get("/")
 def root():
     return {"status": "VFVid API LIVE"}
 
-# -----------------------------
-# UPLOAD VIDEO
-# -----------------------------
+
+# ---------------- UPLOAD ----------------
 @app.post("/upload/")
 async def upload_video(file: UploadFile = File(...)):
-    video_id = str(uuid.uuid4())
-    input_path = os.path.join(VIDEO_DIR, f"{video_id}.mp4")
-    output_path = os.path.join(CERT_DIR, f"certified_{video_id}.mp4")
+    try:
+        cert_id = str(uuid.uuid4())
 
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
+        input_path = f"videos/{cert_id}_{file.filename}"
+        output_path = f"certified/certified_{cert_id}.mp4"
 
-    logo_path = os.path.join(ASSETS_DIR, "logo.png")
+        # Save upload
+        with open(input_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-    # Overlay logo with ffmpeg
-    cmd = [
-        "ffmpeg",
-        "-i", input_path,
-        "-i", logo_path,
-        "-filter_complex", "overlay=W-w-20:H-h-20",
-        "-codec:a", "copy",
-        output_path
-    ]
+        # FFmpeg overlay command
+        cmd = [
+            "ffmpeg",
+            "-i", input_path,
+            "-i", LOGO_PATH,
+            "-filter_complex", "overlay=W-w-20:H-h-20",
+            "-codec:a", "copy",
+            output_path
+        ]
 
-    subprocess.run(cmd)
+        subprocess.run(cmd, check=True)
 
-    return {
-        "certificate_id": video_id,
-        "download": f"/download/{video_id}"
-    }
+        return {
+            "certificate_id": cert_id,
+            "download": f"/download/{cert_id}"
+        }
 
-# -----------------------------
-# DOWNLOAD CERTIFIED VIDEO
-# -----------------------------
-@app.get("/download/{video_id}")
-def download(video_id: str):
-    file_path = os.path.join(CERT_DIR, f"certified_{video_id}.mp4")
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
-    if os.path.exists(file_path):
-        return FileResponse(file_path, media_type="video/mp4")
 
-    return {"detail": "Not Found"}
+# ---------------- DOWNLOAD ----------------
+@app.get("/download/{cert_id}")
+def download_video(cert_id: str):
+    path = f"certified/certified_{cert_id}.mp4"
+
+    if os.path.exists(path):
+        return FileResponse(path, media_type="video/mp4", filename="certified_video.mp4")
+
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
+
 
 
 
